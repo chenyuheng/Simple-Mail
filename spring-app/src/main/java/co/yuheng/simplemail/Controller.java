@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.CrossOrigin;
 
 import com.google.gson.Gson;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 
 @RestController
 @RequestMapping("/api")
@@ -23,15 +25,34 @@ import com.google.gson.Gson;
 public class Controller {
 
 	static Gson gson = new Gson();
+	static JedisPool jedisPool = new JedisPool("localhost", 6379);
 	static HashMap<String, MailboxCredential> credentials = new HashMap<>();
+
+	static String redisCredentialPrefix = "simplemail_credential:";
+	static String redisMailPrefix = "simplemail_mail:";
+
+	public static ResponseEntity<String> authenticateHasError(String token) {
+		if (credentials.containsKey(token)) {
+			return null;
+		}
+		try (Jedis jedis = jedisPool.getResource()) {
+			if (!jedis.exists(redisCredentialPrefix + token)) {
+				return ResponseEntity.status(Response.SC_UNAUTHORIZED).body("Invalid token");
+			}
+			MailboxCredential credential = gson.fromJson(jedis.get(redisCredentialPrefix + token), MailboxCredential.class);
+			credentials.put(token, credential);
+		}
+		return null;
+	}
 
 	@PostMapping("/login")
 	public ResponseEntity<String> handleLogin(@RequestBody MailboxCredential credential) {
 		Pop3Handler handler = Pop3Handler.getInstance();
-		try {
+		try (Jedis jedis = jedisPool.getResource()) {
 			if (handler.validate(credential)) {
 				String token = credential.hashString();
 				credentials.put(token, credential);
+				jedis.set(redisCredentialPrefix + token, gson.toJson(credential));
 				return ResponseEntity.ok(gson.toJson(credential));
 			}
 		} catch (RuntimeException e) {
@@ -43,8 +64,9 @@ public class Controller {
 
 	@GetMapping("/login")
 	public ResponseEntity<String> handleLoginGet(@RequestHeader("Authorization") String token) {
-		if (!credentials.containsKey(token)) {
-			return ResponseEntity.status(Response.SC_UNAUTHORIZED).body("Invalid token");
+		ResponseEntity<String> error = authenticateHasError(token);
+		if (error != null) {
+			return error;
 		}
 		MailboxCredential credential = credentials.get(token);
 		return ResponseEntity.ok(gson.toJson(credential));
@@ -59,8 +81,9 @@ public class Controller {
 
 	@GetMapping("/mails_count")
 	public ResponseEntity<String> handleCount(@RequestHeader("Authorization") String token) {
-		if (!credentials.containsKey(token)) {
-			return ResponseEntity.status(Response.SC_UNAUTHORIZED).body("Invalid token");
+		ResponseEntity<String> error = authenticateHasError(token);
+		if (error != null) {
+			return error;
 		}
 		MailboxCredential credential = credentials.get(token);
 		Pop3Handler handler = Pop3Handler.getInstance();
@@ -78,8 +101,9 @@ public class Controller {
 			@RequestParam(name = "page", defaultValue = "1") int page,
 			@RequestParam(name = "per_page", defaultValue = "10") int pageSize,
 			@RequestHeader("Authorization") String token) {
-		if (!credentials.containsKey(token)) {
-			return ResponseEntity.status(Response.SC_UNAUTHORIZED).body("Invalid token");
+		ResponseEntity<String> error = authenticateHasError(token);
+		if (error != null) {
+			return error;
 		}
 		MailboxCredential credential = credentials.get(token);
 		Pop3Handler handler = Pop3Handler.getInstance();
@@ -101,8 +125,9 @@ public class Controller {
 	public ResponseEntity<String> handleMail(
 			@PathVariable("mail_id") String mailIdStr,
 			@RequestHeader("Authorization") String token) {
-		if (!credentials.containsKey(token)) {
-			return ResponseEntity.status(Response.SC_UNAUTHORIZED).body("Invalid token");
+		ResponseEntity<String> error = authenticateHasError(token);
+		if (error != null) {
+			return error;
 		}
 		MailboxCredential credential = credentials.get(token);
 		int mailId = -1;
@@ -112,10 +137,15 @@ public class Controller {
 			return ResponseEntity.status(Response.SC_BAD_REQUEST).body("Invalid mail id");
 		}
 
-		Pop3Handler handler = Pop3Handler.getInstance();
-		try {
+		try (Jedis jedis = jedisPool.getResource()){
+			String mailKey = redisMailPrefix + token + "_" + mailId;
+			if (jedis.exists(mailKey)) {
+				return ResponseEntity.ok(jedis.get(mailKey));
+			}
+			Pop3Handler handler = Pop3Handler.getInstance();
 			Mail m = handler.getMail(credential, mailId);
 			if (m != null) {
+				jedis.set(mailKey, m.toString());
 				return ResponseEntity.ok(m.toString());
 			}
 		} catch (RuntimeException e) {
