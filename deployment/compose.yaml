@@ -1,0 +1,34 @@
+version: '3'
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.27-latest
+    volumes:
+      - ./envoy-config.yaml:/etc/envoy/envoy.yaml
+      - ./simplemail.crt:/etc/envoy/simplemail.crt
+      - ./simplemail.key:/etc/envoy/simplemail.key
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - simplemail-react
+      - simplemail-spring
+  react:
+    image: chenyuheng99/simplemail-react:latest
+    networks:
+      - simplemail-react
+  spring:
+    image: chenyuheng99/simplemail-springboot:latest
+    networks:
+      - simplemail-spring
+      - simplemail-redis
+  redis:
+    image: redis:latest
+    networks:
+      - simplemail-redis
+networks:
+  simplemail-react:
+    driver: bridge
+  simplemail-spring:
+    driver: bridge
+  simplemail-redis:
+    driver: bridge

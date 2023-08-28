@@ -25,7 +25,7 @@ import redis.clients.jedis.JedisPool;
 public class Controller {
 
 	static Gson gson = new Gson();
-	static JedisPool jedisPool = new JedisPool("localhost", 6379);
+	static JedisPool jedisPool = new JedisPool("redis", 6379);
 	static HashMap<String, MailboxCredential> credentials = new HashMap<>();
 
 	static String redisCredentialPrefix = "simplemail_credential:";

@@ -1,1 +1,1 @@
-export const simpleMailApiUrl = 'http://localhost:8080/api/';
+export const simpleMailApiUrl = 'api/';
